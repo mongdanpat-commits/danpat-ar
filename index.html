@@ -3,91 +3,135 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>단팥이와 AR 사진 찍기</title>
-    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <title>마커리스 AR 사진 찍기</title>
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
+    
+    <script>
+        // 바닥을 인식하고 터치 시 캐릭터를 배치하는 핵심 컴포넌트
+        AFRAME.registerComponent('ar-hit-test', {
+            init: function () {
+                this.xrHitTestSource = null;
+                this.viewerSpace = null;
+                this.refSpace = null;
+
+                // AR 세션이 시작되면 터치 이벤트 활성화
+                this.el.sceneEl.renderer.xr.addEventListener('sessionstart', (ev) => {
+                    let session = this.el.sceneEl.renderer.xr.getSession();
+                    session.addEventListener('select', this.onSelect.bind(this));
+                    
+                    session.requestReferenceSpace('viewer').then((space) => {
+                        this.viewerSpace = space;
+                        session.requestHitTestSource({ space: this.viewerSpace }).then((hitTestSource) => {
+                            this.xrHitTestSource = hitTestSource;
+                        });
+                    });
+                    session.requestReferenceSpace('local-floor').then((space) => {
+                        this.refSpace = space;
+                    });
+                });
+            },
+            onSelect: function () {
+                const reticle = document.getElementById('reticle');
+                // 바닥 인식 표시기가 보일 때만 화면 터치 시 캐릭터 배치
+                if (reticle.getAttribute('visible')) {
+                    const character = document.getElementById('character');
+                    const pos = reticle.getAttribute('position');
+                    
+                    // 이미지 높이가 2.5이므로, 절반인 1.25만큼 Y축을 올려야 발이 바닥에 맞게 닿습니다.
+                    character.setAttribute('position', {x: pos.x, y: pos.y + 1.25, z: pos.z});
+                    character.setAttribute('visible', 'true');
+                }
+            },
+            tick: function () {
+                // 매 프레임마다 바닥을 스캔하여 표시기(Reticle) 위치 업데이트
+                if (this.el.sceneEl.is('ar-mode') && this.xrHitTestSource && this.refSpace) {
+                    let frame = this.el.sceneEl.frame;
+                    if (frame && this.xrHitTestSource) {
+                        let hitTestResults = frame.getHitTestResults(this.xrHitTestSource);
+                        const reticle = document.getElementById('reticle');
+                        if (hitTestResults.length > 0) {
+                            let pose = hitTestResults[0].getPose(this.refSpace);
+                            reticle.setAttribute('position', pose.transform.position);
+                            reticle.setAttribute('visible', 'true');
+                        } else {
+                            reticle.setAttribute('visible', 'false');
+                        }
+                    }
+                }
+            }
+        });
+    </script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
-        /* 사진 촬영 버튼 UI */
-        #snap-btn {
+        #ui-container {
             position: absolute;
             bottom: 40px;
-            left: 50%;
-            transform: translateX(-50%);
+            width: 100%;
+            text-align: center;
+            z-index: 9999;
+            pointer-events: none; /* UI 컨테이너가 터치를 가로채지 않도록 설정 */
+        }
+        #snap-btn {
             padding: 15px 40px;
-            background-color: #FFA500; /* 단팥이 치즈태비 색상 */
+            background-color: #FFA500;
             color: #fff;
             border: 2px solid #fff;
             border-radius: 30px;
             font-size: 18px;
             font-weight: bold;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            z-index: 9999;
+            pointer-events: auto; /* 버튼만 터치 가능하게 설정 */
             cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
         #snap-btn:active { background-color: #e69500; }
+        
+        /* A-Frame 기본 진입 버튼(Enter AR) 스타일 커스텀 */
+        .a-enter-vr-button {
+            background-color: #fff !important;
+            color: #000 !important;
+        }
     </style>
 </head>
-<body style="margin: 0px; overflow: hidden;">
+<body>
+    <div id="ui-container">
+        <button id="snap-btn">📸 찰칵!</button>
+    </div>
 
-    <button id="snap-btn">📸 찰칵!</button>
-
-    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false; trackingMethod: best;" preserveDrawingBuffer="true">
-        
+    <a-scene webxr="requiredFeatures: hit-test, local-floor;" ar-hit-test>
         <a-assets>
-            <img id="danpat-img" src="danpat_transparent.png" crossorigin="anonymous">
+            <img id="char-img" src="danpat_transparent.png" crossorigin="anonymous">
         </a-assets>
 
-        <a-marker preset="hiro">
-            <a-image 
-                src="#danpat-img" 
-                look-at="[camera]" 
-                position="0 1 0" 
-                width="1.5" 
-                height="2.5"
-                transparent="true"
-                alpha-test="0.5">
-            </a-image>
-        </a-marker>
+        <a-entity id="reticle" visible="false">
+            <a-ring color="#FFA500" radius-inner="0.1" radius-outer="0.15" rotation="-90 0 0"></a-ring>
+        </a-entity>
+
+        <a-image id="character"
+                 src="#char-img" 
+                 look-at="[camera]" 
+                 width="1.5" 
+                 height="2.5" 
+                 visible="false"
+                 transparent="true"
+                 alpha-test="0.5">
+        </a-image>
 
         <a-entity camera></a-entity>
     </a-scene>
 
     <script>
         document.getElementById('snap-btn').addEventListener('click', function() {
-            const video = document.querySelector('video');
-            const aCanvas = document.querySelector('.a-canvas');
-
-            if (!video || !aCanvas) {
-                alert("카메라가 아직 준비되지 않았습니다.");
-                return;
+            // WebXR 환경에서는 캔버스 자체를 바로 캡처할 수 있습니다.
+            const canvas = document.querySelector('.a-canvas');
+            if(canvas) {
+                const dataURI = canvas.toDataURL('image/jpeg', 0.9);
+                const link = document.createElement('a');
+                link.download = `AR_Photo_${new Date().getTime()}.jpg`;
+                link.href = dataURI;
+                link.click();
             }
-
-            // 합성을 위한 캔버스 생성
-            const captureCanvas = document.createElement('canvas');
-            captureCanvas.width = video.videoWidth;
-            captureCanvas.height = video.videoHeight;
-            const ctx = captureCanvas.getContext('2d');
-
-            // 1. 현실 배경(비디오) 그리기
-            ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-
-            // 2. AR 캐릭터(WebGL 캔버스) 그리기
-            // 디바이스 해상도 차이를 보정하여 중앙에 맞춤
-            const arWidth = captureCanvas.width;
-            const arHeight = (aCanvas.height / aCanvas.width) * captureCanvas.width;
-            const offsetY = (captureCanvas.height - arHeight) / 2;
-            ctx.drawImage(aCanvas, 0, offsetY, arWidth, arHeight);
-
-            // 3. 이미지 파일로 다운로드
-            const dataURI = captureCanvas.toDataURL('image/jpeg', 0.9);
-            const link = document.createElement('a');
-            link.download = `DanPat_AR_${new Date().getTime()}.jpg`;
-            link.href = dataURI;
-            link.click();
         });
     </script>
 </body>
-
 </html>
